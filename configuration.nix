@@ -1,72 +1,91 @@
-{ config, pkgs, inputs, ... }:
+{ config, pkgs, ... }:
 
 {
   imports = [
     ./hardware-configuration.nix
-    # T2-Hardware-Modul aus nixos-hardware (wird über Flakes oder Channel eingebunden)
-    # <nixos-hardware/apple/t2>
+    <nixos-hardware/apple/t2>
   ];
 
-  # T2-Spezifische Firmware & Kernel
-  hardware.apple-t2.enable = true;
-
-  # Bootloader für Mac EFI
+  # Bootloader
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
 
-  # Netzwerkeinstellungen
-  networking.hostName = "mac-nixos";
-  networking.networkmanager.enable = true;
+  # Binary cache for the T2 kernel (verify key in t2linux wiki)
+  nix.settings = {
+    substituters = [ "https://cache.soopy.moe" ];
+    trusted-public-keys = [ "cache.soopy.moe-1:0RZVsQeR+GOh0VQI9rvnHz55nVXkFardDqfm4+afjPo=" ];
+  };
 
-  # X11 & i3 Window Manager Setup
+  # Broadcom firmware extracted from macOS, stored in ./firmware
+  hardware.enableRedistributableFirmware = true;
+  hardware.firmware = [
+    (pkgs.stdenvNoCC.mkDerivation {
+      name = "brcm-firmware";
+      buildCommand = ''
+        dir="$out/lib/firmware"
+        mkdir -p "$dir"
+        cp -r ${./firmware}/* "$dir"
+      '';
+    })
+  ];
+
+  # Network
+  networking.networkmanager.enable = true;
+  networking.hostName = "nixos-t2";
+
+  # Locale and keyboard
+  time.timeZone = "Europe/Berlin";
+  i18n.defaultLocale = "de_DE.UTF-8";
+  console.keyMap = "de";
+
+  # X11 with i3
   services.xserver = {
     enable = true;
+    xkb.layout = "de";
     windowManager.i3 = {
       enable = true;
       extraPackages = with pkgs; [
-        polybarFull
-        rofi
         dmenu
+        i3status
         i3lock
       ];
     };
   };
 
-  # Tastatur-Layout
-  console.keyMap = "de";
-  services.xserver.xkb = {
-    layout = "de";
-    variant = "mac"; # Optimiert für Mac-Tastaturlayout
+  # Login screen
+  services.displayManager.defaultSession = "none+i3";
+  services.xserver.displayManager.lightdm.enable = true;
+
+  # Keyboard workaround for Firefox and GTK (remove if not needed)
+  environment.sessionVariables = {
+    MOZ_ENABLE_WAYLAND = "0";
+    GTK_IM_MODULE = "none";
   };
 
-  # Audio (PipeWire für T2 Audio-Unterstützung)
-  hardware.pulseaudio.enable = false;
-  security.rtkit.enable = true;
+  # Audio
   services.pipewire = {
     enable = true;
     alsa.enable = true;
     pulse.enable = true;
   };
 
-  # Systemweite Pakete
-  environment.systemPackages = with pkgs; [
-    git
-    vim
-    wget
-    curl
-    alacritty
-    font-awesome
-    nerd-fonts.jetbrains-mono
-  ];
-
-  # Benutzer
+  # User (replace "alex" with your username)
   users.users.alex = {
     isNormalUser = true;
-    extraGroups = [ "networkmanager" "wheel" ];
-    packages = with pkgs; [
-      firefox
-    ];
+    extraGroups = [ "wheel" "networkmanager" "video" "audio" ];
   };
 
-  system.stateVersion = "24.11";
+  # System packages
+  environment.systemPackages = with pkgs; [
+    vim
+    git
+    curl
+    firefox
+    alacritty
+  ];
+
+  nixpkgs.config.allowUnfree = true;
+
+  # Keep the value from your installer
+  system.stateVersion = "24.05";
 }
